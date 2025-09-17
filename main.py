@@ -8,8 +8,10 @@ import requests
 
 # Замініть 'YOUR_BOT_TOKEN' на токен, який ви отримали від BotFather
 BOT_TOKEN = '8264718582:AAGly9dsfTerEak5GbcfGDA5lRDlOndqSbg'
-# URL-адреса вашого API Google Apps Script
-GOOGLE_SHEET_API_URL = 'https://script.google.com/macros/s/AKfycbzt1Hf_6copt-mWjGFzKo78lloDEYAsoDvIIN_IgAPKyyRm348g3O7e9eB5Ouh-gIlEpA/exec'
+
+# URL-адреси вашого API Google Apps Script
+GOOGLE_SHEET_API_ACCESSORIES = 'https://script.google.com/macros/s/AKfycbzt1Hf_6copt-mWjGFzKo78lloDEYAsoDvIIN_IgAPKyyRm348g3O7e9eB5Ouh-gIlEpA/exec'
+GOOGLE_SHEET_API_FILMS = 'https://script.google.com/macros/s/AKfycbwxXf15evwxyGu_0eC2kFHdWnHw3jLS8jEkKgJZjO3mPl7COmGUUGlrKq2uDRqsIy5bAw/exec'
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -20,8 +22,11 @@ category_icons = {
     "Миша комп.": "🖱️",
     "Набір посуду": "🍽️",
     "Сковорода": "🍳",
-    "Клавіатура": "⌨️"
-    }
+    "Клавіатура": "⌨️",
+    "Вирізна 6.5'": "🛡️",
+    "Вирізна 11'": "🧱",
+    "Вирізна 13'": "💎"
+}
 
 pma_icons = {
     "SPUSH": "🔥 Пріоритет",
@@ -37,20 +42,21 @@ pma_icons = {
 @bot.message_handler(commands=['start', 'привіт'])
 def send_greeting_and_button(message):
     keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
-    keyboard.add('Аксесуари ТОП СКЮ')
-    keyboard.add('Плівка та скло')
+    keyboard.add('✨ Аксесуари ТОП СКЮ')
+    keyboard.add('📱 Плівка та скло')
     greeting_text = (
         f"👋 Вітаю, {message.from_user.username}, в інформаційному боті магазину «Міст 1»! 👋\n\n"
-        "Натисніть кнопку «Аксесуари ТОП СКЮ», щоб переглянути ТОП СКЮ аксесуарів!"
+        "Натисніть кнопку, щоб переглянути ТОП СКЮ або інформацію по плівкам та склам!"
     )
     bot.send_message(message.chat.id, greeting_text, reply_markup=keyboard)
 
+
 # --- Обробка натискання на кнопку "Аксесуари ТОП СКЮ" ---
-@bot.message_handler(func=lambda message: message.text == 'Аксесуари ТОП СКЮ')
+@bot.message_handler(func=lambda message: message.text == '✨ Аксесуари ТОП СКЮ')
 def handle_top_sku_button(message):
     status_message = bot.send_message(message.chat.id, "Отримання даних...")
     try:
-        response = requests.get(GOOGLE_SHEET_API_URL)
+        response = requests.get(GOOGLE_SHEET_API_ACCESSORIES)
         response.raise_for_status()
         
         data = response.json()
@@ -62,20 +68,17 @@ def handle_top_sku_button(message):
                                   message_id=status_message.message_id)
             return
 
-        inline_keyboard = telebot.types.InlineKeyboardMarkup(row_width=2) # Вказуємо, що в одному ряду має бути 2 кнопки
+        inline_keyboard = telebot.types.InlineKeyboardMarkup(row_width=2)
         buttons = []
         for category in categories:
             button_text = f"{category_icons.get(category, '')} {category}".strip()
-            buttons.append(telebot.types.InlineKeyboardButton(text=button_text, callback_data=category))
+            buttons.append(telebot.types.InlineKeyboardButton(text=button_text, callback_data=f"accessories_{category}"))
         
-        # inline_keyboard.add(*buttons) # Додаємо всі кнопки одразу (не працює для row_width > 1)
-        
-        # Додаємо кнопки по дві в ряд
         for i in range(0, len(buttons), 2):
             if i + 1 < len(buttons):
                 inline_keyboard.add(buttons[i], buttons[i+1])
             else:
-                inline_keyboard.add(buttons[i]) # Додаємо останню кнопку, якщо вона одна
+                inline_keyboard.add(buttons[i])
 
         bot.edit_message_text("Оберіть категорію аксесуарів:", chat_id=status_message.chat.id, 
                               message_id=status_message.message_id, reply_markup=inline_keyboard)
@@ -89,7 +92,38 @@ def handle_top_sku_button(message):
                               chat_id=status_message.chat.id, 
                               message_id=status_message.message_id)
 
+# --- Обробка натискання на кнопку "Плівка та скло" ---
+@bot.message_handler(func=lambda message: message.text == '📱 Плівка та скло')
+def handle_film_button(message):
+    status_message = bot.send_message(message.chat.id, "Отримання даних...")
+    try:
+        response = requests.get(GOOGLE_SHEET_API_FILMS)
+        response.raise_for_status()
+        
+        data = response.json()
+        categories = data.get('categories', [])
+        
+        if not categories:
+            bot.edit_message_text("На жаль, не вдалося отримати категорії з таблиці. Можливо, список порожній.", 
+                                  chat_id=status_message.chat.id, 
+                                  message_id=status_message.message_id)
+            return
 
+        inline_keyboard = telebot.types.InlineKeyboardMarkup(row_width=2)
+        buttons = []
+        for category in categories:
+            button_text = f"{category_icons.get(category, '')} {category}".strip()
+            buttons.append(telebot.types.InlineKeyboardButton(text=button_text, callback_data=f"films_{category}"))
+        
+        for i in range(0, len(buttons), 2):
+            if i + 1 < len(buttons):
+                inline_keyboard.add(buttons[i], buttons[i+1])
+            else:
+                inline_keyboard.add(buttons[i])
+
+        bot.edit_message_text("Оберіть категорію плівок та стекол:", chat_id=status_message.chat.id, 
+                              message_id=status_message.message_id, reply_markup=inline_keyboard)
+    
     except requests.exceptions.RequestException as e:
         bot.edit_message_text(f"Виникла помилка при отриманні даних з API: {e}", 
                               chat_id=status_message.chat.id, 
@@ -99,6 +133,7 @@ def handle_top_sku_button(message):
                               chat_id=status_message.chat.id, 
                               message_id=status_message.message_id)
 
+
 # --- Обробка натискання на inline-кнопки ---
 @bot.callback_query_handler(func=lambda call: True)
 def handle_inline_button_click(call):
@@ -107,9 +142,13 @@ def handle_inline_button_click(call):
     status_message = bot.send_message(call.message.chat.id, "Отримання даних...")
 
     try:
-        category_name = call.data
+        data_parts = call.data.split('_', 1)
+        source_type = data_parts[0]
+        category_name = data_parts[1]
         
-        response = requests.get(f"{GOOGLE_SHEET_API_URL}?category={category_name}")
+        api_url = GOOGLE_SHEET_API_ACCESSORIES if source_type == 'accessories' else GOOGLE_SHEET_API_FILMS
+        
+        response = requests.get(f"{api_url}?category={category_name}")
         response.raise_for_status()
         
         data = response.json()
@@ -122,8 +161,8 @@ def handle_inline_button_click(call):
 
         bot.delete_message(chat_id=status_message.chat.id, message_id=status_message.message_id)
 
-        message_text = f"*Категорія: {category_name}*\n\n"
-        bot.send_message(call.message.chat.id, message_text, parse_mode='Markdown')
+        message_text_header = f"*Категорія: {category_name}*\n\n"
+        bot.send_message(call.message.chat.id, message_text_header, parse_mode='Markdown')
         for item in items_data:
             link = item.get('link')
             sku = item.get('item_name')
@@ -131,18 +170,23 @@ def handle_inline_button_click(call):
             brand = item.get('item_brand')
             rma = item.get('rma')
             rma_text = pma_icons.get(rma, "")
+            price = item.get('price')
 
             cleaned_description = description.replace(f"{sku}", "").replace(" :", "").replace(";", "").strip()
-
-            if link:
-                message_text = f"SKU: {sku}\n*РМА: {rma_text}*\nBRAND: {brand}\nNAME: **[{cleaned_description}]({link})**\n\n"
+            if price:
+                if link:
+                    message_text = f"SKU: {sku}\nPRICE: {price} грн.\n*РМА: {rma_text}*\nBRAND: {brand}\nNAME: **[{cleaned_description}]({link})**\n\n"
+                else:
+                    message_text = f"SKU: {sku}\nPRICE: {price} грн.\n*РМА: {rma_text}*\nBRAND: {brand}\nNAME: **{cleaned_description}**\n\n"
             else:
-                message_text = f"SKU: {sku}\n*РМА: {rma_text}*\nBRAND: {brand}\nNAME: **{cleaned_description}**\n\n"
+                if link:
+                    message_text = f"SKU: {sku}\n*РМА: {rma_text}*\nBRAND: {brand}\nNAME: **[{cleaned_description}]({link})**\n\n"
+                else:
+                    message_text = f"SKU: {sku}\n*РМА: {rma_text}*\nBRAND: {brand}\nNAME: **{cleaned_description}**\n\n"
+            
 
-            message_text = bot.send_message(call.message.chat.id, message_text, parse_mode='Markdown')
+            bot.send_message(call.message.chat.id, message_text, parse_mode='Markdown')
 
-        bot.delete_message(chat_id=status_message.chat.id, message_id=message_text.message_id)
-    
     except requests.exceptions.RequestException as e:
         bot.delete_message(chat_id=status_message.chat.id, message_id=status_message.message_id)
         bot.send_message(call.message.chat.id, f"Виникла помилка при отриманні даних: {e}")
@@ -180,6 +224,6 @@ if __name__ == "__main__":
     flask_thread.start()
     bot_thread.start()
 
-    # Ожидание завершения потоков (необязательно, если вы хотите, чтобы они работали бесконечно)
+    # Ожидание завершения потоков (необязательно)
     # flask_thread.join()
     # bot_thread.join()
