@@ -1,10 +1,7 @@
-import os
-import threading
-import time
-
-from flask import Flask, send_file
 import telebot
 import requests
+import os
+import time
 
 # Замініть 'YOUR_BOT_TOKEN' на токен, який ви отримали від BotFather
 BOT_TOKEN = '8264718582:AAGly9dsfTerEak5GbcfGDA5lRDlOndqSbg'
@@ -141,6 +138,29 @@ def handle_inline_button_click(call):
 
             message_text = bot.send_message(call.message.chat.id, message_text, parse_mode='Markdown')
 
+
+
+        # message_text = f"**Категорія: {category_name}**\n\n"
+        
+        # for item in items_data:
+        #     link = item.get('link')
+        #     sku = item.get('item_name')
+        #     description = item.get('item_content')
+        #     brand = item.get('item_brand')
+
+        #     cleaned_description = description.replace(f"{sku}", "").replace(" :", "").replace(";", "").strip()
+
+        #     if link:
+        #         message_text += f"SKU: {sku}\n"
+        #         message_text += f"BRAND: {brand}\n"
+        #         message_text += f"NAME: **[{cleaned_description}]({link})**\n\n"
+        #     else:
+        #         message_text += f"SKU: {sku}\n"
+        #         message_text += f"BRAND: {brand}\n"
+        #         message_text += f"NAME: **{cleaned_description}**\n\n"
+
+        # bot.delete_message(chat_id=status_message.chat.id, message_id=status_message.message_id)
+        # bot.send_message(call.message.chat.id, message_text, parse_mode='Markdown')
         bot.delete_message(chat_id=status_message.chat.id, message_id=message_text.message_id)
     
     except requests.exceptions.RequestException as e:
@@ -150,36 +170,13 @@ def handle_inline_button_click(call):
         bot.delete_message(chat_id=status_message.chat.id, message_id=status_message.message_id)
         bot.send_message(call.message.chat.id, f"Виникла невідома помилка: {e}")
 
-# --- Функція для запуска бота ---
-def run_bot():
+# --- Запуск бота ---
+if __name__ == "__main__":
     while True:
         try:
             print("Бот запущено...")
             bot.polling(none_stop=True)
-        except Exception as e:
-            print(f"Бот не запущено... Помилка: {e}")
-            time.sleep(5)
+        except:
+            print("Бот не запущено...")
 
-# --- Функція для запуска Flask-сервера ---
-def run_flask():
-    app.run(port=int(os.environ.get('PORT', 80)), host='0.0.0.0')
-
-app = Flask(__name__)
-
-@app.route("/")
-def index():
-    return send_file('src/index.html')
-
-
-if __name__ == "__main__":
-    # Создаем и запускаем потоки
-    flask_thread = threading.Thread(target=run_flask)
-    bot_thread = threading.Thread(target=run_bot)
-    
-    # Запуск потоков
-    flask_thread.start()
-    bot_thread.start()
-
-    # Ожидание завершения потоков (необязательно, если вы хотите, чтобы они работали бесконечно)
-    # flask_thread.join()
-    # bot_thread.join()
+        time.sleep(5)
