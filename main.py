@@ -1,19 +1,30 @@
 import os
 import threading
 import time
+import json
+import base64
+import datetime
 
 from flask import Flask, send_file
 import telebot
 import requests
+from groq import Groq
 
-# Замініть 'YOUR_BOT_TOKEN' на токен, який ви отримали від BotFather
-BOT_TOKEN = '8264718582:AAGly9dsfTerEak5GbcfGDA5lRDlOndqSbg'
+from dotenv import load_dotenv
+load_dotenv()
+
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 # URL-адреси вашого API Google Apps Script
 GOOGLE_SHEET_API_ACCESSORIES = 'https://script.google.com/macros/s/AKfycbzt1Hf_6copt-mWjGFzKo78lloDEYAsoDvIIN_IgAPKyyRm348g3O7e9eB5Ouh-gIlEpA/exec'
 GOOGLE_SHEET_API_FILMS = 'https://script.google.com/macros/s/AKfycbwxXf15evwxyGu_0eC2kFHdWnHw3jLS8jEkKgJZjO3mPl7COmGUUGlrKq2uDRqsIy5bAw/exec'
+GOOGLE_SHEET_API_WRITE_CHECK_DATA = 'https://script.google.com/macros/s/AKfycbwfyAkC52RoI-CbHiGDi2-ncQEv-RxcCQYfygbDuF8gYTXYxinA3P4IgSWMCzVFqmAJaw/exec'
+GOOGLE_SHEET_API_GET_INSTRUCTIONS = 'https://script.google.com/macros/s/AKfycbzFbS6Jwpbuy3VEEaKhuzGHLT9ZC5f4MpOaqw5h9LjAHSAh3K1Ms9vVw6GXARkRz7Gm/exec'
 
 bot = telebot.TeleBot(BOT_TOKEN)
+client = Groq(api_key=GROQ_API_KEY)
 
 # Dictionary mapping category names to emojis
 category_icons = {
@@ -36,7 +47,22 @@ pma_icons = {
     "Shelf": "✅ На складі",
     "shelf": "✅ На складі"
 }
-
+def get_system_prompt():
+    default_prompt = "Тебе нужно в json\nsky - это код товара \nname - название товара \nint - количество товара \nprice - общая цена \nrole - main_product или accessories или services"
+    try:
+        response = requests.get(GOOGLE_SHEET_API_GET_INSTRUCTIONS, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        if data.get('status') == 'success' and data.get('instruction'):
+            print("Успішно завантажено інструкцію з Google Sheets.")
+            print(data['instruction'])
+            return data['instruction']
+        else:
+            print("Не вдалося отримати інструкцію з Google Sheets, використовуючи резервну.")
+            return default_prompt
+    except requests.exceptions.RequestException as e:
+        print(f"Помилка при завантаженні інструкції: {e}. Використовую резервну.")
+        return default_prompt
 
 # --- Обробка команд /start і /привіт ---
 @bot.message_handler(commands=['start', 'привіт'])
@@ -91,6 +117,126 @@ def handle_top_sku_button(message):
         bot.edit_message_text(f"Виникла невідома помилка: {e}", 
                               chat_id=status_message.chat.id, 
                               message_id=status_message.message_id)
+
+@bot.message_handler(content_types=['photo'])
+def handle_photo_echo(message):
+    status_message = bot.reply_to(message, "Отримав фото. Оброблюю...")
+
+    try:
+        # Отримання системної інструкції
+        system_prompt = get_system_prompt()
+
+        photo_id = message.photo[-1].file_id
+        file_info = bot.get_file(photo_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+        base64_string = base64.b64encode(downloaded_file).decode('utf-8')
+
+        IMAGE_DATA_URL = f"data:image/jpeg;base64,{base64_string}"
+
+        completion = client.chat.completions.create(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            messages=[
+                {
+                    "role": "system",
+                    "content": system_prompt
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Розпізнай цей чек."},
+                        {
+                            "type": "image_url",
+                            "image_url": { "url": IMAGE_DATA_URL }
+                        }
+                    ]
+                }
+            ],
+            temperature=0.5,
+            max_completion_tokens=2048,
+            top_p=1,
+            stream=False,
+            stop=None
+        )
+
+        raw_response_text = completion.choices[0].message.content
+        
+        try:
+            json_str = raw_response_text.split("```json")[1].split("```")[0].strip()
+            parsed_json = json.loads(json_str)
+            
+            # --- ПЕРЕКЛАД РОЛЕЙ ---
+            role_translations = {
+                "main_product": "Основний товар",
+                "accessories": "Аксесуар",
+                "services": "Послуга"
+            }
+            translated_check_data = []
+            for item in parsed_json:
+                translated_item = item.copy()
+                original_role = translated_item.get('role', '')
+                translated_item['role'] = role_translations.get(original_role, original_role)
+                translated_check_data.append(translated_item)
+            # -----------------------
+
+            # --- ВІДПРАВКА ДАНИХ В GOOGLE SHEETS ---
+            try:
+                bot.send_message(message.chat.id, "Розпізнано. Відправляю дані в таблицю...")
+                
+                now = datetime.datetime.now()
+                payload = {
+                    "telegram_id": message.from_user.id,
+                    "telegram_username": message.from_user.username,
+                    "date": now.strftime("%Y-%m-%d"),
+                    "time": now.strftime("%H:%M:%S"),
+                    "check_data": translated_check_data
+                }
+
+                headers = {'Content-Type': 'application/json'}
+                response = requests.post(GOOGLE_SHEET_API_WRITE_CHECK_DATA, headers=headers, data=json.dumps(payload))
+                response.raise_for_status()
+                bot.send_message(message.chat.id, "✅ Дані успішно записано в таблицю.")
+            except requests.exceptions.RequestException as e:
+                bot.send_message(message.chat.id, f"🔴 Помилка при записі даних в таблицю: {e}")
+            # ----------------------------------------
+
+            # # Формуємо текстове повідомлення з даних
+            # final_text = "**Розпізнані дані:**\n\n"
+            # for i, item in enumerate(translated_check_data, 1):
+            #     final_text += f"**Товар {i}:**\n"
+            #     name = str(item.get('name', '-')).replace('*', '').replace('_', '')
+            #     sky = str(item.get('sky', '-')).replace('*', '').replace('_', '')
+            #     item_type = str(item.get('type', '-')).replace('*', '').replace('_', '')
+            #     quantity = str(item.get('int', '-')).replace('*', '').replace('_', '')
+            #     price = str(item.get('price', '-')).replace('*', '').replace('_', '')
+            #     role = str(item.get('role', '-')).replace('*', '').replace('_', '')
+            #     final_text += f"Назва: {name}\n"
+            #     final_text += f"Код: {sky}\n"
+            #     final_text += f"Тип: {item_type}\n"
+            #     final_text += f"К-сть: {quantity}\n"
+            #     final_text += f"Ціна: {price}\n"
+            #     final_text += f"Роль: {role}\n\n"
+
+            # bot.edit_message_text(
+            #     chat_id=status_message.chat.id,
+            #     message_id=status_message.message_id,
+            #     text=final_text,
+            #     parse_mode='Markdown'
+            # )
+
+        except (IndexError, json.JSONDecodeError) as e:
+            bot.edit_message_text(
+                chat_id=status_message.chat.id,
+                message_id=status_message.message_id,
+                text=f"Не вдалося витягти JSON з відповіді моделі. Помилка: {e}\n\n**Оригінальна відповідь:**\n{raw_response_text}"
+            )
+
+    except Exception as e:
+        bot.edit_message_text(
+            chat_id=status_message.chat.id,
+            message_id=status_message.message_id,
+            text=f"Виникла помилка під час обробки фото: {e}"
+        )
+
 
 # --- Обробка натискання на кнопку "Плівка та скло" ---
 @bot.message_handler(func=lambda message: message.text == '📱 Плівка та скло')
