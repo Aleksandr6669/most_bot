@@ -182,7 +182,7 @@ def handle_photo_echo(message):
             try:
                 bot.send_message(message.chat.id, "Розпізнано. Відправляю дані в таблицю...")
                 
-                now = datetime.datetime.now()
+                now = datetime.datetime.now() + datetime.timedelta(hours=2)
                 payload = {
                     "telegram_id": message.from_user.id,
                     "telegram_username": message.from_user.username,
